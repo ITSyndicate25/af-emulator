@@ -602,8 +602,7 @@ if 42 <= major < 47:
     raise SystemExit(0)
 raise SystemExit(1)
 "@ 2>$null)
-        $validationExitCode = $global:LASTEXITCODE
-        return ($validationExitCode -eq 0 -and $validationOutput -contains "AF_CRYPTOGRAPHY_OK")
+        return ($validationOutput -contains "AF_CRYPTOGRAPHY_OK")
     } catch {
         return $false
     }
