@@ -97,8 +97,12 @@ class ServerOnlyBootTests(unittest.TestCase):
         pos = source.index(needle)
         self.assertIn("if DEBUG_AUTH_HEX:", source[max(0, pos - 180):pos])
         self.assertIn("parse_client_dh_plaintext(", source)
-        self.assertIn("--server-only", source)
+        self.assertIn("SERVER_ONLY_MODE", source)
         self.assertIn("local game launch helpers", source)
+        boot_source = (SERVER_DIR / "assaultfire_boot.py").read_text(
+            encoding="utf-8", errors="replace"
+        )
+        self.assertIn("--server-only", boot_source)
 
 
 if __name__ == "__main__":

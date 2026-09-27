@@ -10096,7 +10096,7 @@ print(
 )
 print(
     "[BOOT] AP initialization: "
-    + _V143V_LOCAL_AP_SYNC.describe()
+    + ("disabled in server-only mode" if SERVER_ONLY_MODE else _V143V_LOCAL_AP_SYNC.describe())
 )
 print(
     f"[BOOT] Stable-v143b DS spawner: enabled={V143B_DS_CONFIG.enabled} "
@@ -10162,9 +10162,12 @@ if __name__ == "__main__":
     # Mutable DS runtime state is created only after preflight succeeds.
     _v143b_init_spawner()
 
-    # TEMPORARY local PH AP initializer.  Normal wallet persistence and
-    # A505/A506 purchase handling remain server-authoritative.
-    _V143V_LOCAL_AP_SYNC.start()
+    # TEMPORARY local PH AP initializer. It writes into a local TGame process,
+    # so it is intentionally disabled when this machine is backend-only.
+    if SERVER_ONLY_MODE:
+        print("[SERVER-ONLY] Local TGame AP memory sync disabled.", flush=True)
+    else:
+        _V143V_LOCAL_AP_SYNC.start()
 
     print(
         f"[BOOT] VERSION response: "
@@ -10231,7 +10234,7 @@ if __name__ == "__main__":
             "\n[MAIN] Shutting down.",
             flush=True
         )
-        _V143V_LOCAL_AP_SYNC.stop()
         if not SERVER_ONLY_MODE:
+            _V143V_LOCAL_AP_SYNC.stop()
             update_launch_gate_status(ready=False, reason="server shutting down")
 
