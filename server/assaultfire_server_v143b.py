@@ -19,6 +19,7 @@ import subprocess
 import csv
 import io
 import json
+import sys
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
@@ -39,8 +40,14 @@ from assaultfire_room_registry import (
     RoomRegistryError,
 )
 
-from assaultfire_preflight import run_server_preflight, update_launch_gate_status
+from assaultfire_preflight import (
+    default_preflight_status_path,
+    run_server_preflight,
+    update_launch_gate_status,
+)
 from assaultfire_logging import build_logger
+from assaultfire_auth import parse_client_dh_plaintext
+from assaultfire_boot import resolve_private_key_path, server_only_requested
 from local_ap_sync import LocalAPSync
 
 # v24: v20 success framing plus BOTH PublicData bitmap and PrivateData tail probes.
@@ -48,6 +55,7 @@ QUIET_ROLE_HEX = True
 DEBUG_AUTH_HEX = os.environ.get("AF_DEBUG_AUTH_HEX", "").strip().lower() in (
     "1", "true", "yes", "on"
 )
+SERVER_ONLY_MODE = server_only_requested(sys.argv[1:], os.environ)
 
 def _short_hex(b, n=48):
     b = bytes(b or b'')
@@ -262,10 +270,13 @@ IV = bytes.fromhex(
 PRIME_BYTES = P_PRIME.to_bytes(64, "big")
 
 DEFAULT_PRIVATE_KEY_PATH = Path(__file__).resolve().with_name("PRIVATE.PEM")
-PRIVATE_KEY_PATH = (
-    os.environ.get("AF_PRIVATE_KEY")
-    or os.environ.get("AF_PRIVATE_KEY_PATH")
-    or str(DEFAULT_PRIVATE_KEY_PATH)
+PRIVATE_KEY_PATH = str(
+    resolve_private_key_path(
+        script_path=Path(__file__),
+        argv=sys.argv[1:],
+        env=os.environ,
+        cwd=Path.cwd(),
+    )
 )
 
 
@@ -286,6 +297,11 @@ except Exception as e:
     print(
         f"[BOOT] FAILED to load RSA private key: {e}",
         flush=True
+    )
+    print(
+        "[BOOT] Hint: keep PRIVATE.PEM in server\\, set AF_PRIVATE_KEY, "
+        "or pass --private-key <path>.",
+        flush=True,
     )
     RSA_PRIV = None
 
@@ -991,48 +1007,38 @@ def build_auth_response(request_bytes):
         flush=True
     )
 
-    print(
-        f"[AUTH] RSA plaintext={plain.hex()}",
-        flush=True
-    )
-
-    if len(plain) != 68:
-        raise ValueError(
-            f"unexpected RSA plaintext length: "
-            f"{len(plain)}"
+    if DEBUG_AUTH_HEX:
+        print(
+            f"[AUTH] RSA plaintext={plain.hex()}",
+            flush=True
         )
 
-    # RSA plaintext:
-    #
-    #   0:4   nonce
-    #   4:68  client DH public key
-    #
-    nonce = int.from_bytes(
-        plain[0:4],
-        "big"
+    hello = parse_client_dh_plaintext(
+        plain,
+        prime=P_PRIME,
+        width=64,
     )
-
-    client_pub_bytes = plain[4:68]
-
-    client_pub = int.from_bytes(
-        client_pub_bytes,
-        "big"
-    )
+    nonce = hello.nonce
+    client_pub = hello.client_public
+    client_pub_bytes = hello.canonical_public
 
     print(
         f"[AUTH] nonce=0x{nonce:08x}",
         flush=True
     )
 
-    print(
-        f"[AUTH] client_pub="
-        f"{client_pub_bytes.hex()}",
-        flush=True
-    )
+    if len(hello.wire_public) != 64:
+        print(
+            f"[AUTH] client DH public wire length="
+            f"{len(hello.wire_public)}B; normalized to 64B",
+            flush=True
+        )
 
-    if not (1 < client_pub < P_PRIME):
-        raise ValueError(
-            "invalid client DH public key"
+    if DEBUG_AUTH_HEX:
+        print(
+            f"[AUTH] client_pub="
+            f"{client_pub_bytes.hex()}",
+            flush=True
         )
 
     # ------------------------------------------------------------------
@@ -10106,7 +10112,36 @@ print(
 )
 
 if __name__ == "__main__":
-    if not run_server_preflight(Path(PRIVATE_KEY_PATH)):
+    if SERVER_ONLY_MODE:
+        if RSA_PRIV is None:
+            print(
+                "[SERVER-ONLY] FAILED - a valid RSA PRIVATE.PEM is still required "
+                "for AUTH. Use --private-key <path> or AF_PRIVATE_KEY.",
+                flush=True,
+            )
+            raise SystemExit(2)
+
+        # Never let a stale successful client preflight unlock local launch
+        # helpers while this process is intentionally running without client
+        # validation.
+        _server_only_status = default_preflight_status_path()
+        if _server_only_status.exists():
+            update_launch_gate_status(
+                ready=False,
+                reason="server-only mode: local launch gate intentionally locked",
+            )
+
+        print(
+            "[SERVER-ONLY] ENABLED - skipping local client/TCLS/APClient/hosts "
+            "preflight. Backend listeners may start; local game launch helpers "
+            "remain LOCKED.",
+            flush=True,
+        )
+        print(
+            f"[SERVER-ONLY] RSA private key: {PRIVATE_KEY_PATH}",
+            flush=True,
+        )
+    elif not run_server_preflight(Path(PRIVATE_KEY_PATH)):
         raise SystemExit(2)
 
     # Always show this one line even when the selected console threshold is
@@ -10154,12 +10189,19 @@ if __name__ == "__main__":
     except Exception as bind_exc:
         reason = f"listener bind failed: {type(bind_exc).__name__}: {bind_exc}"
         log("MAIN", reason)
-        update_launch_gate_status(ready=False, reason=reason)
+        if not SERVER_ONLY_MODE:
+            update_launch_gate_status(ready=False, reason=reason)
         raise SystemExit(3)
 
-    # Only after every required TCP/UDP bind succeeds may the game launch gate
-    # become UNLOCKED. If that state cannot be persisted/logged, fail closed.
-    if not update_launch_gate_status(ready=True):
+    # Normal local-client mode keeps the strict launch gate. Server-only mode
+    # deliberately starts listeners without ever unlocking local launch helpers.
+    if SERVER_ONLY_MODE:
+        print(
+            "[SERVER-ONLY] All required listeners bound; local game launch "
+            "gate remains LOCKED.",
+            flush=True,
+        )
+    elif not update_launch_gate_status(ready=True):
         for _label, _kind, _port, sock in listener_sockets:
             try:
                 sock.close()
@@ -10190,5 +10232,6 @@ if __name__ == "__main__":
             flush=True
         )
         _V143V_LOCAL_AP_SYNC.stop()
-        update_launch_gate_status(ready=False, reason="server shutting down")
+        if not SERVER_ONLY_MODE:
+            update_launch_gate_status(ready=False, reason="server shutting down")
 
