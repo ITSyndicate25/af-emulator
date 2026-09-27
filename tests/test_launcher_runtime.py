@@ -34,7 +34,7 @@ class LauncherRuntimeTests(unittest.TestCase):
             env.update(
                 AF_TEST_LAUNCHER=str(ROOT / "START_ASSAULT_FIRE.ps1"),
                 AF_TEST_PYTHON=sys.executable,
-                AF_TEST_ROOT=tmp,
+                AF_TEST_ROOT=str(Path(tmp).resolve()),
                 AF_TEST_REPO=str(ROOT),
             )
             result = subprocess.run(

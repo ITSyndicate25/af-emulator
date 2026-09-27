@@ -9,10 +9,11 @@ def test_ci_workflow_exists():
     assert WORKFLOW.is_file()
 
 
-def test_ci_uses_windows_python_312_and_pytest():
+def test_ci_uses_windows_python_matrix_and_pytest():
     source = WORKFLOW.read_text(encoding="utf-8", errors="replace")
     assert "runs-on: windows-latest" in source
-    assert 'python-version: "3.12"' in source
+    assert 'python: ["3.12", "3.14"]' in source
+    assert "python-version: ${{ matrix.python }}" in source
     assert 'python -m pip install "pytest>=8,<9"' in source
     assert "python -m pytest -v tests" in source
 
