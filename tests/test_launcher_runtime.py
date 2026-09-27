@@ -21,15 +21,7 @@ foreach ($fn in $ast.FindAll({
     param($node)
     $node -is [System.Management.Automation.Language.FunctionDefinitionAst]
 }, $false)) {
-    $definition = $fn.Extent.Text
-    if ($fn.Name -eq "Test-SupportedPythonPath") {
-        $definition = $definition.Replace('} catch {', '} catch { Write-Host ("[PROBE ERROR] " + $Candidate + ": " + $_);')
-        $definition = $definition.Replace('if ($LASTEXITCODE -ne 0 -or -not $probe)', 'Write-Host ("[PROBE RESULT] exe=" + $exe + " exit=" + $LASTEXITCODE + " output=" + $probe); if ($LASTEXITCODE -ne 0 -or -not $probe)')
-    }
-    if ($fn.Name -eq "Find-VenvPython") {
-        $definition = $definition.Replace('$found = Test-SupportedPythonPath $candidate', 'Write-Host ("[CANDIDATE] " + $candidate); $found = Test-SupportedPythonPath $candidate')
-    }
-    . ([scriptblock]::Create($definition))
+    . ([scriptblock]::Create($fn.Extent.Text))
 }
 """
 
@@ -79,6 +71,30 @@ foreach ($staleCode in @(0, 1)) {
     $discovered = Find-VenvPython $venv
     if ($discovered -ne $candidate) { throw "Venv discovery returned wrong path: $discovered" }
 }
+Write-Host "AF_RUNTIME_TEST_PASS"
+""")
+
+    def test_native_warnings_succeed_and_nonzero_exit_fails(self):
+        for shell in self.shells():
+            with self.subTest(shell=shell):
+                self.run_launcher(shell, r"""
+$PSNativeCommandUseErrorActionPreference = $true
+$output = Invoke-Checked -Exe $env:AF_TEST_PYTHON -Arguments @(
+    "-c", "import sys; print('ordinary warning', file=sys.stderr); print('normal output')"
+) -Description "warning with success"
+if ($null -ne $output) { throw "Native output leaked into function result" }
+$failed = $false
+try {
+    Invoke-Checked -Exe $env:AF_TEST_PYTHON -Arguments @(
+        "-c", "import sys; print('failure', file=sys.stderr); sys.exit(7)"
+    ) -Description "expected native failure"
+} catch {
+    if ($_.Exception.Message -notmatch "failed with exit code 7") { throw }
+    $failed = $true
+}
+if (-not $failed) { throw "Native failure was accepted" }
+if ($ErrorActionPreference -ne "Stop") { throw "Error preference was changed" }
+if (-not $PSNativeCommandUseErrorActionPreference) { throw "Native preference was changed" }
 Write-Host "AF_RUNTIME_TEST_PASS"
 """)
 

@@ -29,7 +29,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version 2.0
 
-$LAUNCHER_REVISION = "2026-09-27-oneclick-v16"
+$LAUNCHER_REVISION = "2026-09-27-oneclick-v17"
 $EXPECTED_TGAME_SHA256 = "B4273F2658CA94EEBC559A997FDFCD02D51E77CE75B892250C1DB7FB80C70B51"
 $TCLS_ORIGINAL_SHA256 = "13EAD403452E0F25CF00658369BF4BF5FF34ED1B16027F7833FB27D398386CD1"
 $TCLS_PATCHED_SHA256  = "3FF351E0ADB594D7544E28DB2E966A6D6EB548E9DF70DAAF4DAF58F2EE438D56"
@@ -87,10 +87,20 @@ function Invoke-Checked([string]$Exe, [string[]]$Arguments, [string]$Description
     # success-output pipeline. Callers assign function return values, so leaked
     # pip/python output would be captured together with paths such as
     # .venv\Scripts\python.exe and later treated as one giant command name.
-    & $Exe @Arguments 2>&1 | ForEach-Object {
-        Write-Host ([string]$_)
+    # Windows PowerShell 5.1 turns redirected native stderr into ErrorRecords.
+    # Warnings are not failures: wait for the process and check its exit code.
+    $savedErrorActionPreference = $ErrorActionPreference
+    $PSNativeCommandUseErrorActionPreference = $false
+    $LASTEXITCODE = 1
+    try {
+        $ErrorActionPreference = "Continue"
+        & $Exe @Arguments 2>&1 | ForEach-Object {
+            Write-Host ([string]$_)
+        }
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
     }
-    $exitCode = $LASTEXITCODE
 
     if ($exitCode -ne 0) {
         throw "$Description failed with exit code $exitCode"
@@ -142,10 +152,13 @@ function Test-SupportedPythonPath([string]$Candidate) {
         # Let Python itself decide whether the interpreter is new enough.
         # This avoids PowerShell version-parsing edge cases and works with
         # nonstandard executable names such as python312.exe.
-        $probe = (& $exe -c "import sys; print(('OK|' if sys.version_info >= (3,10) and sys.version_info < (4,0) else 'NO|') + sys.executable)" 2>$null |
-            Select-Object -First 1)
+        # Collect output only after Python exits. Piping the native process into
+        # Select-Object -First 1 can stop it early and produce exit code -1.
+        $probeLines = @(& $exe -c "import sys; print(('OK|' if sys.version_info >= (3,10) and sys.version_info < (4,0) else 'NO|') + sys.executable)" 2>$null)
+        $probeExitCode = $LASTEXITCODE
+        $probe = $probeLines | Select-Object -First 1
 
-        if ($LASTEXITCODE -ne 0 -or -not $probe) {
+        if ($probeExitCode -ne 0 -or -not $probe) {
             return $null
         }
 
@@ -351,9 +364,10 @@ function Resolve-SupportedPython([string]$RepoRoot = "", [string]$GameRoot = "")
         foreach ($minor in @(14, 13, 12, 11, 10)) {
             foreach ($selector in @("-3.$minor", "-V:3.$minor")) {
                 try {
-                    $resolved = (& $pyLauncher.Source $selector -c "import sys; print(sys.executable)" 2>$null |
-                        Select-Object -First 1)
-                    if ($LASTEXITCODE -eq 0 -and $resolved) {
+                    $resolvedLines = @(& $pyLauncher.Source $selector -c "import sys; print(sys.executable)" 2>$null)
+                    $resolveExitCode = $LASTEXITCODE
+                    $resolved = $resolvedLines | Select-Object -First 1
+                    if ($resolveExitCode -eq 0 -and $resolved) {
                         $found = Test-SupportedPythonPath $resolved.Trim()
                         if ($found) {
                             return $found
@@ -560,8 +574,10 @@ function Ensure-SupportedPython([string]$RepoRoot, [string]$GameRoot) {
 
 function Get-PythonVersionText([string]$Exe) {
     try {
-        $line = (& $Exe --version 2>&1 | Select-Object -First 1)
-        if ($LASTEXITCODE -eq 0 -and $line) {
+        $versionLines = @(& $Exe --version 2>&1)
+        $versionExitCode = $LASTEXITCODE
+        $line = $versionLines | Select-Object -First 1
+        if ($versionExitCode -eq 0 -and $line) {
             return ([string]$line).Trim()
         }
     } catch {}
