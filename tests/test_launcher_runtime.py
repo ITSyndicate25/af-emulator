@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LOAD_FUNCTIONS = r"""
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version 2.0
+Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
 $tokens = $null
 $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile(
