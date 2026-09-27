@@ -588,20 +588,9 @@ function Get-PythonVersionText([string]$Exe) {
 function Test-VenvDependencies([string]$VenvPython) {
     # requirements.txt currently contains cryptography>=42,<47.
     try {
-        # Collect complete output and the process status before inspecting either.
-        # The marker makes validation explicit and avoids stale native exit state.
-        $validationOutput = @(& $VenvPython -c @"
-import sys
-try:
-    import cryptography
-    major = int(cryptography.__version__.split(".", 1)[0])
-except Exception:
-    raise SystemExit(1)
-if 42 <= major < 47:
-    print("AF_CRYPTOGRAPHY_OK")
-    raise SystemExit(0)
-raise SystemExit(1)
-"@ 2>$null)
+        # Capture complete output and validate its explicit marker. This avoids
+        # dependence on stale PowerShell native exit state.
+        $validationOutput = @(& $VenvPython -c "import cryptography, sys; major = int(cryptography.__version__.split('.', 1)[0]); print('AF_CRYPTOGRAPHY_OK' if 42 <= major < 47 else 'AF_CRYPTOGRAPHY_BAD'); sys.exit(0 if 42 <= major < 47 else 1)" 2>$null)
         return ($validationOutput -contains "AF_CRYPTOGRAPHY_OK")
     } catch {
         return $false
