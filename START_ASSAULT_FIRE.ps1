@@ -91,7 +91,8 @@ function Invoke-Checked([string]$Exe, [string[]]$Arguments, [string]$Description
     # Warnings are not failures: wait for the process and check its exit code.
     $savedErrorActionPreference = $ErrorActionPreference
     $PSNativeCommandUseErrorActionPreference = $false
-    $LASTEXITCODE = 1
+    # Native processes update the global automatic variable; do not shadow it.
+    $global:LASTEXITCODE = 1
     try {
         $ErrorActionPreference = "Continue"
         & $Exe @Arguments 2>&1 | ForEach-Object {
