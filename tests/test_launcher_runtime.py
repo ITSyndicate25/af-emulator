@@ -21,7 +21,14 @@ foreach ($fn in $ast.FindAll({
     param($node)
     $node -is [System.Management.Automation.Language.FunctionDefinitionAst]
 }, $false)) {
-    . ([scriptblock]::Create($fn.Extent.Text))
+    $definition = $fn.Extent.Text
+    if ($fn.Name -eq "Test-SupportedPythonPath") {
+        $definition = $definition.Replace('} catch {', '} catch { Write-Host ("[PROBE ERROR] " + $Candidate + ": " + $_);')
+    }
+    if ($fn.Name -eq "Find-VenvPython") {
+        $definition = $definition.Replace('$found = Test-SupportedPythonPath $candidate', 'Write-Host ("[CANDIDATE] " + $candidate); $found = Test-SupportedPythonPath $candidate')
+    }
+    . ([scriptblock]::Create($definition))
 }
 """
 
