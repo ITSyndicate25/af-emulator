@@ -12,6 +12,32 @@ LOAD_FUNCTIONS = r"""
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version 2.0
 Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
+# Some hosted PowerShell 5.1 images omit the Utility module from PSModulePath.
+# Supply the same SHA-256 result shape used by the launcher when the cmdlet is absent.
+if (-not (Get-Command Get-FileHash -ErrorAction SilentlyContinue)) {
+    function Get-FileHash {
+        param(
+            [Parameter(Mandatory=$true)][string]$LiteralPath,
+            [string]$Algorithm = "SHA256"
+        )
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $stream = [System.IO.File]::OpenRead($LiteralPath)
+            try {
+                $bytes = $sha.ComputeHash($stream)
+            } finally {
+                $stream.Dispose()
+            }
+        } finally {
+            $sha.Dispose()
+        }
+        [pscustomobject]@{
+            Algorithm = "SHA256"
+            Hash = ([System.BitConverter]::ToString($bytes) -replace "-", "")
+            Path = $LiteralPath
+        }
+    }
+}
 $tokens = $null
 $parseErrors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile(
