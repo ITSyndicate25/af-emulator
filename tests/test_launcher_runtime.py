@@ -130,6 +130,12 @@ Write-Host "AF_RUNTIME_TEST_PASS"
             with self.subTest(shell=shell):
                 self.run_launcher(shell, r"""
 $first = Ensure-Venv $env:AF_TEST_REPO $env:AF_TEST_ROOT $env:AF_TEST_PYTHON
+foreach ($staleCode in @(0, 1)) {
+    $global:LASTEXITCODE = $staleCode
+    if (-not (Test-VenvDependencies $first)) {
+        throw "Installed dependency rejected with prior exit code $staleCode"
+    }
+}
 if ($first -is [array] -or -not $first) { throw "Bootstrap returned polluted or empty path" }
 if (-not (Test-VenvDependencies $first)) { throw "Fresh venv dependencies invalid" }
 $stamp = (Get-Item -LiteralPath $first).LastWriteTimeUtc
