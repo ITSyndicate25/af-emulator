@@ -24,6 +24,7 @@ foreach ($fn in $ast.FindAll({
     $definition = $fn.Extent.Text
     if ($fn.Name -eq "Test-SupportedPythonPath") {
         $definition = $definition.Replace('} catch {', '} catch { Write-Host ("[PROBE ERROR] " + $Candidate + ": " + $_);')
+        $definition = $definition.Replace('if ($LASTEXITCODE -ne 0 -or -not $probe)', 'Write-Host ("[PROBE RESULT] exe=" + $exe + " exit=" + $LASTEXITCODE + " output=" + $probe); if ($LASTEXITCODE -ne 0 -or -not $probe)')
     }
     if ($fn.Name -eq "Find-VenvPython") {
         $definition = $definition.Replace('$found = Test-SupportedPythonPath $candidate', 'Write-Host ("[CANDIDATE] " + $candidate); $found = Test-SupportedPythonPath $candidate')
